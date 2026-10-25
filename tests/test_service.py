@@ -3,10 +3,10 @@ import unittest
 from decimal import Decimal
 from pathlib import Path
 
-from src.models.document import ParsedDocument
-from src.repositories.document_repository import DocumentRepository
-from src.services.document_service import DocumentService
-from src.services.exceptions import DocumentImportError, DuplicateDocumentError
+from invoice_organizer.models.document import ParsedDocument
+from invoice_organizer.repositories.document_repository import DocumentRepository
+from invoice_organizer.services.document_service import DocumentService
+from invoice_organizer.services.exceptions import DocumentImportError, DuplicateDocumentError
 
 
 class StubParserFactory:
@@ -72,6 +72,21 @@ class DocumentServiceTests(unittest.TestCase):
         self.assertEqual(updated.issue_date, "2026-10-21")
         self.assertIsNone(updated.due_date)
         self.assertEqual(updated.amount, Decimal("1234.56"))
+
+    def test_parses_dot_grouped_amount_as_thousands(self) -> None:
+        document = self.service.import_pdf("invoice.pdf", self.pdf_bytes)
+
+        updated = self.service.update_metadata(
+            document.id, "", "", "", "", "1.500"
+        )
+
+        self.assertEqual(updated.amount, Decimal(1500))
+
+    def test_rejects_negative_manual_amount(self) -> None:
+        document = self.service.import_pdf("invoice.pdf", self.pdf_bytes)
+
+        with self.assertRaisesRegex(DocumentImportError, "não negativo"):
+            self.service.update_metadata(document.id, "", "", "", "", "-1,00")
 
     def test_rejects_invalid_manual_date(self) -> None:
         document = self.service.import_pdf("invoice.pdf", self.pdf_bytes)

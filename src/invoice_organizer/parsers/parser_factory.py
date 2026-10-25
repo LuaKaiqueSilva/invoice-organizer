@@ -2,15 +2,20 @@ from io import BytesIO
 
 from pypdf import PdfReader
 
-from src.models.document import ParsedDocument
-from src.parsers.bank_slip_parser import BankSlipParser
-from src.parsers.base_parser import BaseParser
-from src.parsers.invoice_parser import InvoiceParser
-from src.parsers.ocr import extract_text_with_ocr
+from invoice_organizer.models.document import ParsedDocument
+from invoice_organizer.parsers.bank_slip_parser import BankSlipParser
+from invoice_organizer.parsers.base_parser import BaseParser
+from invoice_organizer.parsers.invoice_parser import InvoiceParser
+from invoice_organizer.parsers.ocr import OcrError, extract_text_with_ocr
+from invoice_organizer.utils.text_normalization import normalize_text
 
 
 class DocumentParseError(ValueError):
     """The PDF could not be read or did not contain selectable text."""
+
+
+class NoSelectableTextError(DocumentParseError):
+    """The PDF is valid but has no text layer, so OCR may be needed."""
 
 
 class ParserFactory:
@@ -19,7 +24,16 @@ class ParserFactory:
         try:
             reader = PdfReader(BytesIO(pdf_bytes), strict=False)
             if reader.is_encrypted:
-                raise DocumentParseError("PDFs protegidos por senha não são aceitos.")
+                try:
+                    decrypted = reader.decrypt("")
+                except Exception as error:
+                    raise DocumentParseError(
+                        "Este PDF está protegido por senha e não pode ser aberto sem ela."
+                    ) from error
+                if not decrypted:
+                    raise DocumentParseError(
+                        "Este PDF está protegido por senha e não pode ser aberto sem ela."
+                    )
             if len(reader.pages) > 100:
                 raise DocumentParseError("O PDF excede o limite de 100 páginas.")
             text = "\n".join(page.extract_text() or "" for page in reader.pages)
@@ -29,21 +43,19 @@ class ParserFactory:
             raise DocumentParseError("Não foi possível ler este arquivo como PDF.") from error
 
         if not text.strip():
-            raise DocumentParseError(
-                "Não encontrei texto selecionável. PDFs digitalizados ainda não têm suporte a OCR."
+            raise NoSelectableTextError(
+                "Não encontrei texto selecionável neste PDF."
             )
         return text
 
     @staticmethod
     def detect_type(text: str) -> str:
-        normalized = text.casefold()
+        normalized = normalize_text(text)
         bank_slip_terms = (
-            "linha digitável",
             "linha digitavel",
-            "código de barras",
             "codigo de barras",
-            "nosso número",
-            "beneficiário",
+            "nosso numero",
+            "beneficiario",
         )
         invoice_terms = (
             "nota fiscal",
@@ -62,12 +74,10 @@ class ParserFactory:
         try:
             text = cls.extract_text(pdf_bytes)
             extraction_method = "text"
-        except DocumentParseError as error:
-            if "texto selecionável" not in str(error):
-                raise
+        except NoSelectableTextError:
             try:
                 text = extract_text_with_ocr(pdf_bytes)
-            except RuntimeError as ocr_error:
+            except OcrError as ocr_error:
                 raise DocumentParseError(str(ocr_error)) from ocr_error
             if not text.strip():
                 raise DocumentParseError(

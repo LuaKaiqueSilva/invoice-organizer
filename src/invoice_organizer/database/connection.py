@@ -4,8 +4,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from src.config.settings import DATABASE_PATH
-from src.database.schema import initialize_schema
+from invoice_organizer.config.settings import DATABASE_PATH
+from invoice_organizer.database.schema import initialize_schema
 
 
 @contextmanager

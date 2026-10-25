@@ -1,6 +1,24 @@
 from io import BytesIO
 
-MAX_OCR_PAGES = 15
+MAX_OCR_PAGES = 5
+OCR_RENDER_SCALE = 4
+OCR_PAGE_TIMEOUT_SECONDS = 15
+
+
+class OcrError(RuntimeError):
+    """Base class for expected local OCR failures."""
+
+
+class OcrUnavailableError(OcrError):
+    """Optional OCR dependencies or language data are not installed."""
+
+
+class OcrPageLimitError(OcrError):
+    """The document exceeds the OCR page limit."""
+
+
+class OcrProcessingError(OcrError):
+    """The local OCR engine could not process this document."""
 
 
 def extract_text_with_ocr(pdf_bytes: bytes) -> str:
@@ -9,7 +27,7 @@ def extract_text_with_ocr(pdf_bytes: bytes) -> str:
         import pypdfium2 as pdfium
         import pytesseract
     except ImportError as error:
-        raise RuntimeError(
+        raise OcrUnavailableError(
             "Este PDF parece digitalizado. Para usar OCR local, instale as dependências "
             "opcionais de requirements-ocr.txt e o Tesseract OCR."
         ) from error
@@ -17,39 +35,32 @@ def extract_text_with_ocr(pdf_bytes: bytes) -> str:
     try:
         pdf = pdfium.PdfDocument(BytesIO(pdf_bytes))
         if len(pdf) > MAX_OCR_PAGES:
-            raise RuntimeError(
+            raise OcrPageLimitError(
                 f"O OCR local aceita até {MAX_OCR_PAGES} páginas por documento."
             )
         available_languages = set(pytesseract.get_languages(config=""))
         if "por" not in available_languages:
-            raise RuntimeError(
+            raise OcrUnavailableError(
                 "O idioma português do Tesseract não está instalado. Instale o pacote "
                 "de idioma português e tente novamente."
             )
         language = "por+eng" if "eng" in available_languages else "por"
         page_text = []
         for page in pdf:
-            image = page.render(scale=2).to_pil()
+            image = page.render(scale=OCR_RENDER_SCALE).to_pil()
             page_text.append(
                 pytesseract.image_to_string(
                     image,
                     lang=language,
                     config="--psm 6",
-                    timeout=30,
+                    timeout=OCR_PAGE_TIMEOUT_SECONDS,
                 )
             )
         return "\n".join(page_text).strip()
-    except RuntimeError as error:
-        if str(error).startswith("O OCR local aceita") or str(error).startswith(
-            "O idioma português"
-        ):
-            raise
-        raise RuntimeError(
-            "Não foi possível executar o OCR. Confira se o Tesseract e o idioma "
-            "português estão instalados."
-        ) from error
+    except OcrError:
+        raise
     except Exception as error:
-        raise RuntimeError(
+        raise OcrProcessingError(
             "Não foi possível executar o OCR. Confira se o Tesseract e o idioma "
             "português estão instalados."
         ) from error

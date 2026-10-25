@@ -5,8 +5,8 @@ from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 
-from src.models.document import Document
-from src.repositories.document_repository import DocumentRepository
+from invoice_organizer.models.document import Document
+from invoice_organizer.repositories.document_repository import DocumentRepository
 
 
 class DocumentRepositoryTests(unittest.TestCase):

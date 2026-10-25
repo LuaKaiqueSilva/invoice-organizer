@@ -51,7 +51,7 @@ No Windows PowerShell, ative o ambiente com:
 ## Executar
 
 ```bash
-streamlit run src/main.py
+streamlit run app.py
 ```
 
 Ou execute `./scripts/run.sh` se instalou pelo script acima.
@@ -67,7 +67,7 @@ sudo apt install tesseract-ocr tesseract-ocr-por
 python -m pip install -r requirements-ocr.txt
 ```
 
-O inglês é usado como idioma adicional se estiver disponível no Tesseract. O OCR roda na máquina local, aceita até 15 páginas por arquivo e não envia o PDF a serviços externos. Se o Tesseract ou as dependências não estiverem instalados, PDFs com texto selecionável continuam funcionando normalmente. O app identifica quais documentos foram lidos por OCR e exibe um aviso para conferir os campos.
+O inglês é usado como idioma adicional se estiver disponível no Tesseract. O OCR roda na máquina local, renderiza as páginas em resolução próxima a 300 dpi, aceita até 5 páginas por arquivo e não envia o PDF a serviços externos. Se o Tesseract ou as dependências não estiverem instalados, PDFs com texto selecionável continuam funcionando normalmente. O app identifica quais documentos foram lidos por OCR e exibe um aviso para conferir os campos.
 
 Para testar: desative o modo de demonstração, baixe `example_scanned_invoice.pdf` no painel e importe-o. A extração de texto normal não exige OCR.
 
@@ -89,6 +89,7 @@ Os PDFs e o banco ficam na pasta local `data/`, ignorada pelo Git. O app não en
 
 - **SQLite** mantém os metadados em um único arquivo, sem exigir servidor ou conta externa; os PDFs permanecem na pasta local.
 - **Extração por rótulos conhecidos** mantém o MVP leve e explicável, mas não promete compatibilidade com todo emissor.
+- Para boletos com linha digitável de 47 dígitos, confere os dígitos verificadores antes de usar valor e fator de vencimento como complemento. O fator é ambíguo após o reinício em 22/02/2025; quando as duas datas são possíveis, escolhe a mais próxima de hoje, conforme a [especificação do Santander](https://cms.santander.com.br/sites/WPS/documentos/arq-cobranca-barras-port-jul22/25-05-06_134319_codigo-de+barras-santander-abril-2025-v36-ptbr.pdf).
 - **OCR local opcional** preserva o funcionamento básico sem dependências de sistema e evita enviar documentos financeiros a uma API.
 - **SHA-256** evita importar duas vezes exatamente o mesmo PDF; não tenta deduplicar versões diferentes do mesmo documento.
 - O CSV protege células iniciadas por caracteres de fórmula para reduzir risco ao abrir em planilhas.
@@ -104,22 +105,23 @@ Para OCR, use `example_scanned_invoice.pdf` após instalar os componentes opcion
 
 ## Limitações atuais
 
-- PDFs protegidos por senha ou sem texto selecionável não são importados.
-- Não há OCR, validação fiscal, conexão bancária, envio automático de pagamentos nem classificação contábil.
+- PDFs com senha de abertura são recusados. PDFs protegidos apenas por senha de proprietário são aceitos quando abertos com senha vazia; AES usa a dependência criptográfica incluída.
+- OCR é opcional e local, limitado a 5 páginas. Não há validação fiscal, conexão bancária, envio automático de pagamentos nem classificação contábil.
 - Os layouts de notas e boletos variam; a extração usa rótulos textuais conhecidos e não substitui conferência humana.
 
 ## Estrutura
 
 ```text
 src/
-├── config/       # caminhos e limites locais
-├── dashboard/    # interface Streamlit
-├── database/     # conexão e esquema SQLite
-├── models/       # estruturas de documento
-├── parsers/      # extração de campos a partir do texto do PDF
-├── repositories/ # persistência
-├── services/     # validação e importação
-└── utils/        # leitura e armazenamento seguro de PDFs
+└── invoice_organizer/
+    ├── config/       # caminhos e limites locais
+    ├── dashboard/    # interface Streamlit
+    ├── database/     # conexão e esquema SQLite
+    ├── models/       # estruturas de documento
+    ├── parsers/      # extração de texto, boleto e OCR
+    ├── repositories/ # persistência
+    ├── services/     # validação e importação
+    └── utils/        # normalização e armazenamento seguro
 ```
 
 ## Licença

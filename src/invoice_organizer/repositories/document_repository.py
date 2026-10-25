@@ -2,9 +2,9 @@ from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 
-from src.config.settings import DATABASE_PATH
-from src.database.connection import get_connection
-from src.models.document import Document
+from invoice_organizer.config.settings import DATABASE_PATH
+from invoice_organizer.database.connection import get_connection
+from invoice_organizer.models.document import Document
 
 
 class DocumentRepository:

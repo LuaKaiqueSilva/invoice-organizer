@@ -3,13 +3,14 @@ from abc import ABC
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
-from src.models.document import ParsedDocument
+from invoice_organizer.models.document import ParsedDocument
+from invoice_organizer.utils.text_normalization import normalize_text, normalize_text_with_mapping
 
 
 class BaseParser(ABC):
     document_type = "other"
-    issuer_labels = ("emitente", "fornecedor", "beneficiário", "beneficiario", "cedente")
-    number_labels = ("número da nota", "numero da nota", "número do documento", "nosso número", "nosso numero")
+    issuer_labels = ("emitente", "fornecedor", "beneficiario", "cedente")
+    number_labels = ("numero da nota", "numero do documento", "nosso numero")
     amount_labels = (
         "valor total da nota",
         "valor total da fatura",
@@ -17,39 +18,57 @@ class BaseParser(ABC):
         "valor do documento",
         "valor cobrado",
         "valor a pagar",
+        "valor do boleto",
         "valor total",
         "valor",
     )
 
     def parse(self, text: str) -> ParsedDocument:
-        normalized = "\n".join(line.strip() for line in text.splitlines() if line.strip())
+        original = "\n".join(line.strip() for line in text.splitlines() if line.strip())
+        normalized, original_indexes = normalize_text_with_mapping(original)
         return ParsedDocument(
             document_type=self.document_type,
-            issuer=self._extract_labeled_text(normalized, self.issuer_labels),
-            document_number=self._extract_labeled_text(normalized, self.number_labels),
-            issue_date=self._extract_date(normalized, ("data de emissão", "data de emissao", "emissão", "emissao")),
+            issuer=self._extract_labeled_text(
+                original, normalized, original_indexes, self.issuer_labels
+            ),
+            document_number=self._extract_labeled_text(
+                original, normalized, original_indexes, self.number_labels
+            ),
+            issue_date=self._extract_date(normalized, ("data de emissao", "emissao")),
             due_date=self._extract_date(normalized, ("data de vencimento", "vencimento")),
             amount=self._extract_amount(normalized),
         )
 
     @staticmethod
-    def _extract_labeled_text(text: str, labels: tuple[str, ...]) -> str | None:
-        label_pattern = "|".join(re.escape(label) for label in labels)
+    def _extract_labeled_text(
+        original: str,
+        normalized: str,
+        original_indexes: list[int],
+        labels: tuple[str, ...],
+    ) -> str | None:
+        label_pattern = "|".join(
+            re.escape(normalize_text(label)) for label in sorted(labels, key=len, reverse=True)
+        )
         match = re.search(
-            rf"(?:{label_pattern})\s*(?:n[º°o]\s*)?[:\-]?\s*([^\n|;]+)",
-            text,
+            rf"(?:{label_pattern})[ \t]*(?:n[º°]|no(?=[ \t.:]))?[ \t]*[:\-]?[ \t]*([^\n|;]+)",
+            normalized,
             flags=re.IGNORECASE,
         )
         if not match:
             return None
-        value = match.group(1).strip(" \t:-")
+        start, end = match.span(1)
+        original_start = original_indexes[start]
+        original_end = original_indexes[end - 1] + 1
+        value = original[original_start:original_end].strip(" \t:-")
         return value[:160] or None
 
     @staticmethod
     def _extract_date(text: str, labels: tuple[str, ...]) -> str | None:
-        label_pattern = "|".join(re.escape(label) for label in labels)
+        label_pattern = "|".join(
+            re.escape(normalize_text(label)) for label in sorted(labels, key=len, reverse=True)
+        )
         match = re.search(
-            rf"(?:{label_pattern})\s*[:\-]?\s*(\d{{2}}[/.\-]\d{{2}}[/.\-]\d{{4}}|\d{{4}}-\d{{2}}-\d{{2}})",
+            rf"(?:{label_pattern})[ \t]*[:\-]?[ \t]*(\d{{2}}[/.-]\d{{2}}[/.-]\d{{4}}|\d{{4}}-\d{{2}}-\d{{2}})",
             text,
             flags=re.IGNORECASE,
         )
@@ -64,9 +83,11 @@ class BaseParser(ABC):
         return None
 
     def _extract_amount(self, text: str) -> Decimal | None:
+        # Require cents so a day/month from an adjacent date cannot masquerade
+        # as a plausible amount when a PDF layout interleaves columns.
         for label in self.amount_labels:
             match = re.search(
-                rf"{re.escape(label)}\s*[:\-]?\s*(?:R\$\s*)?([\d.]+(?:,\d{{1,2}})?|[\d,]+(?:\.\d{{1,2}})?)",
+                rf"{re.escape(normalize_text(label))}\s*[:\-]?\s*(?:r\$\s*)?(\d+(?:\.\d{{3}})*,\d{{2}}|\d+\.\d{{2}})",
                 text,
                 flags=re.IGNORECASE,
             )
@@ -86,7 +107,7 @@ class BaseParser(ABC):
             else:
                 cleaned = cleaned.replace(",", "")
         elif "," in cleaned:
-            cleaned = cleaned.replace(".", "").replace(",", ".")
+            cleaned = cleaned.replace(",", ".")
         elif cleaned.count(".") > 1:
             parts = cleaned.split(".")
             cleaned = "".join(parts[:-1]) + "." + parts[-1]

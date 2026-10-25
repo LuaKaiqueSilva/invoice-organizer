@@ -1,7 +1,7 @@
 import unittest
 from decimal import Decimal
 
-from src.dashboard.app import csv_safe_cell, format_amount
+from invoice_organizer.dashboard.app import csv_safe_cell, format_amount
 
 
 class DashboardFormattingTests(unittest.TestCase):

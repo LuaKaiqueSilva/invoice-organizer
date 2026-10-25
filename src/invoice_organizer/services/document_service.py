@@ -1,15 +1,16 @@
 import hashlib
+import re
 import uuid
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-from src.config.settings import DOCUMENTS_DIR, MAX_PDF_SIZE_BYTES
-from src.models.document import Document
-from src.parsers.parser_factory import DocumentParseError, ParserFactory
-from src.repositories.document_repository import DocumentRepository
-from src.services.exceptions import DocumentImportError, DuplicateDocumentError
-from src.utils.file_utils import clean_display_filename, save_pdf_safely
+from invoice_organizer.config.settings import DOCUMENTS_DIR, MAX_PDF_SIZE_BYTES
+from invoice_organizer.models.document import Document
+from invoice_organizer.parsers.parser_factory import DocumentParseError, ParserFactory
+from invoice_organizer.repositories.document_repository import DocumentRepository
+from invoice_organizer.services.exceptions import DocumentImportError, DuplicateDocumentError
+from invoice_organizer.utils.file_utils import clean_display_filename, save_pdf_safely
 
 
 class DocumentService:
@@ -111,15 +112,15 @@ class DocumentService:
             except ValueError as error:
                 raise DocumentImportError("Informe as datas no formato AAAA-MM-DD.") from error
 
-        cleaned_amount = amount.strip().replace("R$", "").replace(" ", "")
+        cleaned_amount = amount.strip().upper().replace("R$", "").replace(" ", "")
         if "," in cleaned_amount:
             cleaned_amount = cleaned_amount.replace(".", "").replace(",", ".")
         try:
-            parsed_amount = Decimal(cleaned_amount) if cleaned_amount else None
-            if parsed_amount is not None and not parsed_amount.is_finite():
-                raise InvalidOperation
-        except InvalidOperation as error:
-            raise DocumentImportError("Informe um valor válido, por exemplo 123,45.") from error
+            parsed_amount = _parse_manual_amount(cleaned_amount)
+        except (InvalidOperation, ValueError) as error:
+            raise DocumentImportError(
+                "Informe um valor não negativo, por exemplo 123,45 ou 1.500."
+            ) from error
 
         updated = self.repository.update_metadata(
             document_id,
@@ -141,3 +142,26 @@ class DocumentService:
         if stored_name.name == document.stored_name and stored_name.suffix.lower() == ".pdf":
             (self.documents_dir / stored_name).unlink(missing_ok=True)
         return True
+
+
+def _parse_manual_amount(value: str) -> Decimal | None:
+    if not value:
+        return None
+    if value.startswith(("-", "−")):
+        raise ValueError("Negative amounts are not accepted in this form.")
+
+    if "," in value:
+        if not re.fullmatch(r"(?:\d+|\d{1,3}(?:\.\d{3})+),\d{1,2}", value):
+            raise ValueError("Invalid Brazilian amount.")
+        normalized = value.replace(".", "").replace(",", ".")
+    elif re.fullmatch(r"\d{1,3}(?:\.\d{3})+", value):
+        normalized = value.replace(".", "")
+    elif re.fullmatch(r"\d+(?:\.\d{1,2})?", value):
+        normalized = value
+    else:
+        raise ValueError("Invalid amount.")
+
+    amount = Decimal(normalized)
+    if not amount.is_finite() or amount < 0:
+        raise ValueError("Invalid amount.")
+    return amount

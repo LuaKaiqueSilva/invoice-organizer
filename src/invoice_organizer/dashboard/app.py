@@ -7,11 +7,11 @@ from pathlib import Path
 
 import streamlit as st
 
-from src.config.settings import MAX_PDF_SIZE_BYTES
-from src.demo import build_demo_documents
-from src.models.document import Document
-from src.services.document_service import DocumentService
-from src.services.exceptions import DocumentImportError, DuplicateDocumentError
+from invoice_organizer.config.settings import MAX_PDF_SIZE_BYTES
+from invoice_organizer.demo import build_demo_documents
+from invoice_organizer.models.document import Document
+from invoice_organizer.services.document_service import DocumentService
+from invoice_organizer.services.exceptions import DocumentImportError, DuplicateDocumentError
 
 TYPE_LABELS = {
     "invoice": "Nota fiscal",
@@ -112,11 +112,12 @@ def main() -> None:
         )
         if st.button("Importar PDF", type="primary", disabled=demo_mode or uploaded_file is None):
             try:
-                document = get_document_service().import_pdf(
-                    uploaded_file.name,
-                    uploaded_file.getvalue(),
-                    selected_type,
-                )
+                with st.spinner("Importando PDF e extraindo os dados…"):
+                    document = get_document_service().import_pdf(
+                        uploaded_file.name,
+                        uploaded_file.getvalue(),
+                        selected_type,
+                    )
                 st.session_state["import_notice"] = (
                     f"{document.file_name} importado. Confira os campos extraídos abaixo."
                 )
@@ -129,7 +130,7 @@ def main() -> None:
                 logger.exception("Document import failed")
                 st.error("Não foi possível importar o documento. Verifique o arquivo e tente novamente.")
 
-    examples_dir = Path(__file__).resolve().parents[2] / "examples"
+    examples_dir = Path(__file__).resolve().parents[3] / "examples"
     with st.expander("Baixar PDFs fictícios para experimentar"):
         st.caption("Os arquivos são sintéticos e não contêm dados financeiros reais.")
         for example_name, label in (
@@ -230,13 +231,20 @@ def main() -> None:
             st.markdown(f"**Valor:** {format_amount(selected_document.amount)}")
         with file_col:
             if not demo_mode:
-                pdf = get_document_service().get_pdf_bytes(selected_document.id)
-                if pdf:
-                    st.download_button(
-                        "Baixar PDF original",
-                        data=pdf[1],
-                        file_name=pdf[0],
-                        mime="application/pdf",
+                try:
+                    pdf = get_document_service().get_pdf_bytes(selected_document.id)
+                    if pdf:
+                        st.download_button(
+                            "Baixar PDF original",
+                            data=pdf[1],
+                            file_name=pdf[0],
+                            mime="application/pdf",
+                        )
+                except OSError:
+                    logger.exception("Stored PDF is missing or unreadable")
+                    st.warning(
+                        "O arquivo PDF não foi encontrado ou não pode ser lido. "
+                        "Os dados do documento continuam salvos."
                     )
         if not demo_mode:
             with st.expander("Corrigir campos extraídos"):

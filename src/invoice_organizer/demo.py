@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-from src.models.document import Document
+from invoice_organizer.models.document import Document
 
 
 def build_demo_documents() -> list[Document]:

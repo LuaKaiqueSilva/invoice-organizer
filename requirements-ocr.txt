@@ -1,3 +1,1 @@
--r requirements.txt
-pypdfium2>=4.30,<6
-pytesseract>=0.3.13,<1
+-e .[ocr]

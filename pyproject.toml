@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "invoice-organizer"
+version = "0.2.0"
+description = "Organizador local de notas fiscais e boletos em PDF"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "streamlit>=1.49,<2",
+    "pypdf[crypto]>=5,<7",
+]
+
+[project.optional-dependencies]
+ocr = [
+    "pypdfium2>=4.30,<6",
+    "pytesseract>=0.3.13,<1",
+]
+dev = ["ruff>=0.5,<1"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["invoice_organizer*"]
+
+[tool.ruff]
+line-length = 100

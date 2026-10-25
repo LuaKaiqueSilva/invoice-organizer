@@ -3,6 +3,7 @@ import io
 import logging
 import sqlite3
 from decimal import Decimal
+from pathlib import Path
 
 import streamlit as st
 
@@ -37,7 +38,17 @@ def to_csv(documents: list[Document]) -> str:
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(
-        ["Arquivo", "Tipo", "Emitente/beneficiário", "Número", "Emissão", "Vencimento", "Valor", "Importado em"]
+        [
+            "Arquivo",
+            "Tipo",
+            "Emitente/beneficiário",
+            "Número",
+            "Emissão",
+            "Vencimento",
+            "Valor",
+            "Método de extração",
+            "Importado em",
+        ]
     )
     for document in documents:
         writer.writerow(
@@ -49,6 +60,7 @@ def to_csv(documents: list[Document]) -> str:
                 document.issue_date or "",
                 document.due_date or "",
                 str(document.amount) if document.amount is not None else "",
+                "OCR" if document.extraction_method == "ocr" else "Texto do PDF",
                 document.created_at.isoformat(timespec="seconds"),
             ]
         )
@@ -77,7 +89,10 @@ def main() -> None:
         st.info("Modo de demonstração: os dados abaixo são fictícios e não são salvos.")
 
     with st.expander("Importar documento PDF", expanded=not demo_mode):
-        st.write("Aceita PDFs com texto selecionável de até 15 MB. Documentos escaneados ainda não têm OCR.")
+        st.write(
+            "Aceita PDFs de até 15 MB. PDFs escaneados usam OCR local opcional quando "
+            "o Tesseract está instalado."
+        )
         selected_type_label = st.selectbox(
             "Tipo do documento",
             ("Detectar automaticamente", "Nota fiscal", "Boleto", "Outro"),
@@ -114,10 +129,31 @@ def main() -> None:
                 logger.exception("Document import failed")
                 st.error("Não foi possível importar o documento. Verifique o arquivo e tente novamente.")
 
+    examples_dir = Path(__file__).resolve().parents[2] / "examples"
+    with st.expander("Baixar PDFs fictícios para experimentar"):
+        st.caption("Os arquivos são sintéticos e não contêm dados financeiros reais.")
+        for example_name, label in (
+            ("example_invoice.pdf", "Nota fiscal com texto"),
+            ("example_bank_slip.pdf", "Boleto com texto"),
+            ("example_scanned_invoice.pdf", "Nota fiscal digitalizada para testar OCR"),
+        ):
+            example_path = examples_dir / example_name
+            if example_path.is_file():
+                st.download_button(
+                    label,
+                    data=example_path.read_bytes(),
+                    file_name=example_name,
+                    mime="application/pdf",
+                    key=f"download_{example_name}",
+                )
+
     notice = st.session_state.pop("import_notice", None)
     if notice:
         st.success(notice)
         st.caption("Confira os dados extraídos com o PDF original antes de usá-los.")
+    action_notice = st.session_state.pop("action_notice", None)
+    if action_notice:
+        st.success(action_notice)
 
     documents = build_demo_documents() if demo_mode else get_document_service().list_documents()
     invoice_count = sum(document.document_type == "invoice" for document in documents)
@@ -181,6 +217,12 @@ def main() -> None:
         selected_document = document_options[selected_label]
         details_col, file_col = st.columns([3, 1])
         with details_col:
+            if selected_document.extraction_method == "ocr":
+                st.warning(
+                    "Este documento foi lido por OCR. Confira todos os campos no PDF original."
+                )
+            else:
+                st.caption("Campos extraídos do texto selecionável do PDF.")
             st.markdown(f"**Emitente / beneficiário:** {selected_document.issuer or 'Não identificado'}")
             st.markdown(f"**Número:** {selected_document.document_number or 'Não identificado'}")
             st.markdown(f"**Data de emissão:** {selected_document.issue_date or 'Não identificada'}")
@@ -196,6 +238,57 @@ def main() -> None:
                         file_name=pdf[0],
                         mime="application/pdf",
                     )
+        if not demo_mode:
+            with st.expander("Corrigir campos extraídos"):
+                with st.form(f"edit_document_{selected_document.id}"):
+                    edited_issuer = st.text_input(
+                        "Emitente / beneficiário", value=selected_document.issuer or ""
+                    )
+                    edited_number = st.text_input(
+                        "Número", value=selected_document.document_number or ""
+                    )
+                    edited_issue_date = st.text_input(
+                        "Data de emissão (AAAA-MM-DD)", value=selected_document.issue_date or ""
+                    )
+                    edited_due_date = st.text_input(
+                        "Vencimento (AAAA-MM-DD)", value=selected_document.due_date or ""
+                    )
+                    edited_amount = st.text_input(
+                        "Valor (ex.: 123,45)",
+                        value=str(selected_document.amount) if selected_document.amount is not None else "",
+                    )
+                    save_changes = st.form_submit_button("Salvar correções")
+                if save_changes:
+                    try:
+                        get_document_service().update_metadata(
+                            selected_document.id,
+                            edited_issuer,
+                            edited_number,
+                            edited_issue_date,
+                            edited_due_date,
+                            edited_amount,
+                        )
+                        st.session_state["action_notice"] = "Campos atualizados."
+                        st.rerun()
+                    except DocumentImportError as error:
+                        st.error(str(error))
+                    except sqlite3.Error:
+                        logger.exception("Document metadata update failed")
+                        st.error("Não foi possível salvar as alterações.")
+
+            confirm_delete = st.checkbox(
+                "Confirmo que quero excluir este documento e o PDF armazenado.",
+                key=f"confirm_delete_{selected_document.id}",
+            )
+            if st.button("Excluir documento", disabled=not confirm_delete):
+                try:
+                    if get_document_service().delete_document(selected_document.id):
+                        st.session_state["action_notice"] = "Documento excluído."
+                        st.rerun()
+                    st.warning("Este documento já foi removido.")
+                except (OSError, sqlite3.Error):
+                    logger.exception("Document deletion failed")
+                    st.error("Não foi possível excluir o documento.")
     else:
         st.info(
             "Nenhum documento nesta lista. Ative o Modo de demonstração para ver exemplos fictícios, "
@@ -204,6 +297,6 @@ def main() -> None:
 
     st.divider()
     st.caption(
-        "A extração automática pode falhar conforme o layout do documento. "
-        "Confira os valores no PDF original."
+        "A extração automática pode falhar. Resultados de OCR exigem atenção especial; "
+        "confira os valores no PDF original."
     )

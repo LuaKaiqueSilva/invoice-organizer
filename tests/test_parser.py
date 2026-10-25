@@ -1,6 +1,7 @@
 import unittest
 from decimal import Decimal
 from io import BytesIO
+from pathlib import Path
 from unittest.mock import patch
 
 from pypdf import PdfWriter
@@ -93,6 +94,30 @@ class DocumentParserTests(unittest.TestCase):
         self.assertEqual(parsed.document_type, "invoice")
         self.assertEqual(parsed.document_number, "888")
         self.assertEqual(parsed.amount, Decimal("10.00"))
+
+    def test_factory_uses_ocr_when_pdf_has_no_selectable_text(self) -> None:
+        scanned_pdf = (Path(__file__).resolve().parents[1] / "examples" / "example_scanned_invoice.pdf").read_bytes()
+        with patch(
+            "src.parsers.parser_factory.extract_text_with_ocr",
+            return_value=(
+                "DANFE\nRazao social: Loja Exemplo Ltda.\n"
+                "Numero da nota fiscal: 888\nValor total: R$ 10,00"
+            ),
+        ):
+            parsed = ParserFactory.parse_pdf(scanned_pdf, "auto")
+
+        self.assertEqual(parsed.document_type, "invoice")
+        self.assertEqual(parsed.extraction_method, "ocr")
+
+    def test_factory_exposes_missing_ocr_setup_for_scanned_pdf(self) -> None:
+        with (
+            patch(
+                "src.parsers.parser_factory.extract_text_with_ocr",
+                side_effect=RuntimeError("Instale OCR local."),
+            ),
+            self.assertRaisesRegex(DocumentParseError, "Instale OCR local"),
+        ):
+                ParserFactory.parse_pdf(self.make_text_pdf(()), "auto")
 
     def test_extracts_fields_from_a_real_text_pdf(self) -> None:
         pdf = self.make_text_pdf(

@@ -1,6 +1,7 @@
 import hashlib
 import uuid
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from src.config.settings import DOCUMENTS_DIR, MAX_PDF_SIZE_BYTES
@@ -62,6 +63,7 @@ class DocumentService:
             amount=parsed.amount,
             sha256=digest,
             created_at=datetime.now(),
+            extraction_method=parsed.extraction_method,
         )
 
         save_pdf_safely(content, destination)
@@ -84,3 +86,58 @@ class DocumentService:
             raise DocumentImportError("O caminho do documento armazenado é inválido.")
         path = self.documents_dir / stored_name
         return document.file_name, path.read_bytes()
+
+    def update_metadata(
+        self,
+        document_id: str,
+        issuer: str,
+        document_number: str,
+        issue_date: str,
+        due_date: str,
+        amount: str,
+    ) -> Document:
+        def clean_text(value: str) -> str | None:
+            cleaned = value.strip()
+            if len(cleaned) > 250:
+                raise DocumentImportError("Os campos de texto devem ter até 250 caracteres.")
+            return cleaned or None
+
+        def clean_date(value: str) -> str | None:
+            cleaned = value.strip()
+            if not cleaned:
+                return None
+            try:
+                return date.fromisoformat(cleaned).isoformat()
+            except ValueError as error:
+                raise DocumentImportError("Informe as datas no formato AAAA-MM-DD.") from error
+
+        cleaned_amount = amount.strip().replace("R$", "").replace(" ", "")
+        if "," in cleaned_amount:
+            cleaned_amount = cleaned_amount.replace(".", "").replace(",", ".")
+        try:
+            parsed_amount = Decimal(cleaned_amount) if cleaned_amount else None
+            if parsed_amount is not None and not parsed_amount.is_finite():
+                raise InvalidOperation
+        except InvalidOperation as error:
+            raise DocumentImportError("Informe um valor válido, por exemplo 123,45.") from error
+
+        updated = self.repository.update_metadata(
+            document_id,
+            clean_text(issuer),
+            clean_text(document_number),
+            clean_date(issue_date),
+            clean_date(due_date),
+            parsed_amount,
+        )
+        if updated is None:
+            raise DocumentImportError("Este documento não foi encontrado.")
+        return updated
+
+    def delete_document(self, document_id: str) -> bool:
+        document = self.repository.delete(document_id)
+        if document is None:
+            return False
+        stored_name = Path(document.stored_name)
+        if stored_name.name == document.stored_name and stored_name.suffix.lower() == ".pdf":
+            (self.documents_dir / stored_name).unlink(missing_ok=True)
+        return True

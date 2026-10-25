@@ -48,6 +48,23 @@ class DocumentRepositoryTests(unittest.TestCase):
         with self.assertRaises(sqlite3.IntegrityError):
             self.repository.add(duplicate_hash)
 
+    def test_migrates_database_created_before_extraction_method_column(self) -> None:
+        legacy_path = Path(self.temp_dir.name) / "legacy.sqlite3"
+        with sqlite3.connect(legacy_path) as connection:
+            connection.execute(
+                """CREATE TABLE documents (
+                    id TEXT PRIMARY KEY, file_name TEXT NOT NULL, stored_name TEXT NOT NULL UNIQUE,
+                    document_type TEXT NOT NULL, issuer TEXT, document_number TEXT,
+                    issue_date TEXT, due_date TEXT, amount TEXT, sha256 TEXT NOT NULL UNIQUE,
+                    created_at TEXT NOT NULL
+                )"""
+            )
+
+        self.assertEqual(DocumentRepository(legacy_path).list_all(), [])
+        with sqlite3.connect(legacy_path) as connection:
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(documents)")}
+        self.assertIn("extraction_method", columns)
+
 
 if __name__ == "__main__":
     unittest.main()

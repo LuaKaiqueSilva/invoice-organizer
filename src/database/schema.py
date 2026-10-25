@@ -16,10 +16,18 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
             due_date TEXT,
             amount TEXT,
             sha256 TEXT NOT NULL UNIQUE,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            extraction_method TEXT NOT NULL DEFAULT 'text'
         )
         """
     )
+    columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(documents)").fetchall()
+    }
+    if "extraction_method" not in columns:
+        connection.execute(
+            "ALTER TABLE documents ADD COLUMN extraction_method TEXT NOT NULL DEFAULT 'text'"
+        )
     connection.execute(
         "CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at)"
     )

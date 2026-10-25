@@ -60,6 +60,35 @@ class DocumentServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(DocumentImportError, "limite"):
             self.service.import_pdf("large.pdf", self.pdf_bytes + b"x" * 100)
 
+    def test_updates_document_metadata_with_brazilian_amount(self) -> None:
+        document = self.service.import_pdf("invoice.pdf", self.pdf_bytes)
+
+        updated = self.service.update_metadata(
+            document.id, "Loja Corrigida", "NF 99", "2026-10-21", "", "R$ 1.234,56"
+        )
+
+        self.assertEqual(updated.issuer, "Loja Corrigida")
+        self.assertEqual(updated.document_number, "NF 99")
+        self.assertEqual(updated.issue_date, "2026-10-21")
+        self.assertIsNone(updated.due_date)
+        self.assertEqual(updated.amount, Decimal("1234.56"))
+
+    def test_rejects_invalid_manual_date(self) -> None:
+        document = self.service.import_pdf("invoice.pdf", self.pdf_bytes)
+
+        with self.assertRaisesRegex(DocumentImportError, "AAAA-MM-DD"):
+            self.service.update_metadata(document.id, "", "", "21/10/2026", "", "")
+
+    def test_deletes_document_and_stored_pdf(self) -> None:
+        document = self.service.import_pdf("invoice.pdf", self.pdf_bytes)
+        stored_path = self.root / "documents" / document.stored_name
+        self.assertTrue(stored_path.exists())
+
+        self.assertTrue(self.service.delete_document(document.id))
+
+        self.assertFalse(stored_path.exists())
+        self.assertEqual(self.service.list_documents(), [])
+
 
 if __name__ == "__main__":
     unittest.main()

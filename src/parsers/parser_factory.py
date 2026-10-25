@@ -6,6 +6,7 @@ from src.models.document import ParsedDocument
 from src.parsers.bank_slip_parser import BankSlipParser
 from src.parsers.base_parser import BaseParser
 from src.parsers.invoice_parser import InvoiceParser
+from src.parsers.ocr import extract_text_with_ocr
 
 
 class DocumentParseError(ValueError):
@@ -58,7 +59,21 @@ class ParserFactory:
 
     @classmethod
     def parse_pdf(cls, pdf_bytes: bytes, selected_type: str = "auto") -> ParsedDocument:
-        text = cls.extract_text(pdf_bytes)
+        try:
+            text = cls.extract_text(pdf_bytes)
+            extraction_method = "text"
+        except DocumentParseError as error:
+            if "texto selecionável" not in str(error):
+                raise
+            try:
+                text = extract_text_with_ocr(pdf_bytes)
+            except RuntimeError as ocr_error:
+                raise DocumentParseError(str(ocr_error)) from ocr_error
+            if not text.strip():
+                raise DocumentParseError(
+                    "O OCR não reconheceu texto neste PDF. Tente um arquivo mais nítido."
+                )
+            extraction_method = "ocr"
         document_type = cls.detect_type(text) if selected_type == "auto" else selected_type
         parser: BaseParser
         if document_type == "invoice":
@@ -67,4 +82,13 @@ class ParserFactory:
             parser = BankSlipParser()
         else:
             parser = BaseParser()
-        return parser.parse(text)
+        parsed = parser.parse(text)
+        return ParsedDocument(
+            document_type=parsed.document_type,
+            issuer=parsed.issuer,
+            document_number=parsed.document_number,
+            issue_date=parsed.issue_date,
+            due_date=parsed.due_date,
+            amount=parsed.amount,
+            extraction_method=extraction_method,
+        )

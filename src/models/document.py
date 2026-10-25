@@ -11,6 +11,7 @@ class ParsedDocument:
     issue_date: str | None = None
     due_date: str | None = None
     amount: Decimal | None = None
+    extraction_method: str = "text"
 
 
 @dataclass(frozen=True)
@@ -26,3 +27,4 @@ class Document:
     amount: Decimal | None
     sha256: str
     created_at: datetime
+    extraction_method: str = "text"

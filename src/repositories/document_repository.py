@@ -25,6 +25,7 @@ class DocumentRepository:
             amount=Decimal(row["amount"]) if row["amount"] is not None else None,
             sha256=row["sha256"],
             created_at=datetime.fromisoformat(row["created_at"]),
+            extraction_method=row["extraction_method"],
         )
 
     def add(self, document: Document) -> None:
@@ -33,8 +34,9 @@ class DocumentRepository:
                 """
                 INSERT INTO documents (
                     id, file_name, stored_name, document_type, issuer,
-                    document_number, issue_date, due_date, amount, sha256, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    document_number, issue_date, due_date, amount, sha256, created_at,
+                    extraction_method
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     document.id,
@@ -48,6 +50,7 @@ class DocumentRepository:
                     str(document.amount) if document.amount is not None else None,
                     document.sha256,
                     document.created_at.isoformat(),
+                    document.extraction_method,
                 ),
             )
 
@@ -71,3 +74,42 @@ class DocumentRepository:
                 "SELECT * FROM documents ORDER BY created_at DESC, file_name COLLATE NOCASE"
             ).fetchall()
         return [self._from_row(row) for row in rows]
+
+    def update_metadata(
+        self,
+        document_id: str,
+        issuer: str | None,
+        document_number: str | None,
+        issue_date: str | None,
+        due_date: str | None,
+        amount: Decimal | None,
+    ) -> Document | None:
+        with get_connection(self.database_path) as connection:
+            cursor = connection.execute(
+                """UPDATE documents SET issuer = ?, document_number = ?, issue_date = ?,
+                   due_date = ?, amount = ? WHERE id = ?""",
+                (
+                    issuer,
+                    document_number,
+                    issue_date,
+                    due_date,
+                    str(amount) if amount is not None else None,
+                    document_id,
+                ),
+            )
+            if cursor.rowcount == 0:
+                return None
+            row = connection.execute(
+                "SELECT * FROM documents WHERE id = ?", (document_id,)
+            ).fetchone()
+        return self._from_row(row) if row else None
+
+    def delete(self, document_id: str) -> Document | None:
+        with get_connection(self.database_path) as connection:
+            row = connection.execute(
+                "SELECT * FROM documents WHERE id = ?", (document_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            connection.execute("DELETE FROM documents WHERE id = ?", (document_id,))
+        return self._from_row(row)
